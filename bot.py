@@ -10,7 +10,7 @@ app = Flask(__name__)
 TOKEN = os.getenv("BALE_TOKEN")
 # حتما چک کن آدرس با tapi شروع بشه
 API_URL = f"https://tapi.bale.ai/bot{TOKEN}" 
-SHEET_ID = "آیدی_شیت_خودت_را_اینجا_بگذار"
+SHEET_ID = "1kuBmsqgBGHzctHJxoUFt9d3-Hb6m-ZQ6CDZMtJMKPzg"
 GOOGLE_CREDS_JSON = os.getenv("GOOGLE_CREDS_JSON")
 
 @app.route('/')
@@ -52,12 +52,12 @@ def bot_polling():
                                 "resize_keyboard": True,
                                 "one_time_keyboard": True
                             }
-                            send_message(chat_id, "سلام! خوش آمدید. برای دریافت لینک دوره، لطفا دکمه زیر را بزنید:", kb)
+                            send_message(chat_id, "سلام! خوش آمدید. برای دریافت لینک دوره رایگان، لطفا دکمه «ارسال شماره موبایل» زیر را بزنید:", kb)
                         
                         elif "contact" in message:
                             phone = message["contact"]["phone_number"]
                             # اینجا کد ذخیره در گوگل شیت رو که قبلا داشتیم صدا بزن
-                            send_message(chat_id, f"ممنون! شماره {phone} ثبت شد. لینک دوره: [لینک شما]")
+                            send_message(chat_id, f"باتشکر! شماره {phone}  ثبت شد. لینک دوره: ble.ir/join/9Ufz6EYmCs")
 
             time.sleep(1)
         except Exception as e:
