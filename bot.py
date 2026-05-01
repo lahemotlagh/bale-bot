@@ -1,70 +1,60 @@
-import requests
-import time
-import json
 import os
+import json
+import requests
+import gspread
+from google.oauth2.service_account import Credentials
 
-TOKEN = os.getenv("BALE_TOKEN")
-BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}"
+# --- تنظیمات اولیه ---
+TOKEN = os.environ.get('BALE_TOKEN')
+# خواندن JSON از محیط Render
+CREDS_JSON = os.environ.get('GOOGLE_CREDS_JSON')
+# آیدی شیت خودت رو اینجا بذار (همون که تو URL شیت هست)
+SHEET_ID = "1kuBmsqgBGHzctHJxoUFt9d3-Hb6m-ZQ6CDZMtJMKPzg"
 
-def send_message(chat_id, text, reply_markup=None):
-    payload = {
-        "chat_id": chat_id,
-        "text": text
-    }
-    if reply_markup:
-        payload["reply_markup"] = reply_markup
+# --- متصل شدن به Google Sheets ---
+def connect_to_sheets():
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    creds_dict = json.loads(CREDS_JSON)
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    client = gspread.authorize(creds)
+    # باز کردن شیت اول
+    sheet = client.open_by_key(SHEET_ID).sheet1
+    return sheet
 
-    requests.post(f"{BASE_URL}/sendMessage", json=payload)
+# --- تابع ارسال پیام به بله ---
+def send_message(chat_id, text):
+    url = f"https://api.bale.ai/bot{TOKEN}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text}
+    requests.post(url, json=payload)
 
-def get_updates(offset=None):
-    url = f"{BASE_URL}/getUpdates"
-    params = {"offset": offset} if offset else {}
-    response = requests.get(url, params=params)
-    return response.json()
+# --- حلقه اصلی بات ---
+def main():
+    print("بات بله با موفقیت اجرا شد...")
+    sheet = connect_to_sheets()
+    last_update_id = 0
 
-print("Bot started...")
+    while True:
+        try:
+            url = f"https://api.bale.ai/bot{TOKEN}/getUpdates?offset={last_update_id + 1}"
+            response = requests.get(url).json()
 
-last_update_id = None
+            if response.get("ok"):
+                for update in response.get("result", []):
+                    last_update_id = update["update_id"]
+                    message = update.get("message", {})
+                    chat_id = message.get("chat", {}).get("id")
+                    text = message.get("text")
+                    username = message.get("from", {}).get("username", "بدون آیدی")
 
-while True:
-    updates = get_updates(last_update_id)
+                    if text:
+                        # ذخیره در گوگل شیت: [آیدی چت، نام کاربری، متن پیام]
+                        sheet.append_row([chat_id, username, text])
+                        
+                        # تایید به کاربر
+                        send_message(chat_id, "اطلاعات شما با موفقیت در گوگل شیت ثبت شد! ✅")
+        
+        except Exception as e:
+            print(f"خطایی رخ داد: {e}")
 
-    if "result" in updates and len(updates["result"]) > 0:
-        for update in updates["result"]:
-            last_update_id = update["update_id"] + 1
-
-            message = update.get("message")
-            if not message:
-                continue
-
-            chat_id = message["chat"]["id"]
-
-            # کاربر شماره تلفن ارسال کرده
-            if "contact" in message:
-                phone = message["contact"]["phone_number"]
-                
-                send_message(chat_id, f"شماره شما ثبت شد: {phone}")
-                send_message(chat_id, "لطفاً وارد کانال دوره شوید: ble.ir/join/9Ufz6EYmCs")
-                continue
-
-            # پیام عادی کاربر
-            if "text" in message:
-                text = message["text"]
-
-                # درخواست شماره تلفن + دکمه مخصوص
-                reply_markup = {
-                    "keyboard": [
-                        [
-                            {
-                                "text": "ارسال شماره موبایل 📱",
-                                "request_contact": True
-                            }
-                        ]
-                    ],
-                    "one_time_keyboard": True,
-                    "resize_keyboard": True
-                }
-
-                send_message(chat_id, "سلام دوست عزیز! شماره موبایلت رو برام بفرست 🌟", reply_markup)
-
-    time.sleep(2)
+if __name__ == "__main__":
+    main()
