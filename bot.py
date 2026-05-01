@@ -57,7 +57,13 @@ def bot_polling():
                         elif "contact" in message:
                             phone = message["contact"]["phone_number"]
                             # اینجا کد ذخیره در گوگل شیت رو که قبلا داشتیم صدا بزن
-                            send_message(chat_id, f"باتشکر! شماره {phone}  ثبت شد. لینک دوره: ble.ir/join/9Ufz6EYmCs")
+send_message(
+    chat_id,
+    "✅ باتشکر!\n\n"
+    " شماره ثبت شد.\n\n"
+    "🎓  دوره آموزشی هوش مصنوعی برای کسب و کار:\n"
+    "👉 ble.ir/join/9Ufz6EYmCs"
+)
 
             time.sleep(1)
         except Exception as e:
