@@ -65,6 +65,6 @@ while True:
                     "resize_keyboard": True
                 }
 
-                send_message(chat_id, "سلام پیام عزیز! شماره موبایلت رو برام بفرست 🌟", reply_markup)
+                send_message(chat_id, "سلام دوست عزیز! شماره موبایلت رو برام بفرست 🌟", reply_markup)
 
     time.sleep(2)
