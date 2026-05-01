@@ -4,23 +4,6 @@ import requests
 import gspread
 from google.oauth2.service_account import Credentials
 
-import os
-import threading
-import http.server
-import socketserver
-
-# --- این بخش برای گول زدن رندر اضافه شده ---
-def run_dummy_server():
-    port = int(os.environ.get("PORT", 8080))
-    handler = http.server.SimpleHTTPRequestHandler
-    with socketserver.TCPServer(("", port), handler) as httpd:
-        print(f"Dummy server running on port {port}")
-        httpd.serve_forever()
-
-# اجرای سرور در یک رشته جداگانه
-threading.Thread(target=run_dummy_server, daemon=True).start()
-# ------------------------------------------
-
 # --- تنظیمات اولیه ---
 TOKEN = os.environ.get('BALE_TOKEN')
 # خواندن JSON از محیط Render
