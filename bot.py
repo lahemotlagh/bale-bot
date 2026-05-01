@@ -1,95 +1,142 @@
 import os
 import json
-import requests
-import gspread
 import threading
+import time
+import requests
 from flask import Flask
+
+# -------- تنظیمات اولیه --------
+TOKEN = os.environ.get("BALE_TOKEN")
+if not TOKEN:
+    raise RuntimeError("BALE_TOKEN is not set in environment variables")
+
+# Google Sheets config
+import gspread
 from google.oauth2.service_account import Credentials
 
-# --- Flask health check برای Render ---
+GOOGLE_CREDS_JSON = os.environ.get("GOOGLE_CREDS_JSON")
+if not GOOGLE_CREDS_JSON:
+    raise RuntimeError("GOOGLE_CREDS_JSON is not set in environment variables")
+
+creds_dict = json.loads(GOOGLE_CREDS_JSON)
+scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+gc = gspread.authorize(credentials)
+
+# TODO: اینو با آیدی شیت خودت عوض کن
+SHEET_ID = "YOUR_SHEET_ID_HERE"
+sheet = gc.open_by_key(SHEET_ID).sheet1
+
+COURSE_CHANNEL_LINK = "https://t.me/YOUR_CHANNEL_ID"
+
+# -------- Flask برای Render --------
 app = Flask(__name__)
 
-@app.route('/')
-def health_check():
-    return "Bot is running!", 200
+@app.route("/")
+def health():
+    return "OK", 200
 
 def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 
+# -------- توابع بات بله --------
+API_URL = f"https://api.bale.ai/bot{TOKEN}"
 
-# --- تنظیمات محیط ---
-TOKEN = os.environ.get('BALE_TOKEN')
-CREDS_JSON = os.environ.get('GOOGLE_CREDS_JSON')
-SHEET_ID = "1kuBmsqgBGHzctHJxoUFt9d3-Hb6m-ZQ6CDZMtJMKPzg"
+def delete_webhook():
+    try:
+        url = f"{API_URL}/deleteWebhook"
+        r = requests.get(url, timeout=10)
+        print("deleteWebhook:", r.status_code, r.text)
+    except Exception as e:
+        print("Error in delete_webhook:", e)
 
-# --- اتصال به Google Sheets ---
-def connect_to_sheets():
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds_dict = json.loads(CREDS_JSON)
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    client = gspread.authorize(creds)
-    sheet = client.open_by_key(SHEET_ID).sheet1
-    return sheet
+def get_updates(offset=None, timeout=30):
+    params = {"timeout": timeout}
+    if offset:
+        params["offset"] = offset
+    r = requests.get(f"{API_URL}/getUpdates", params=params, timeout=timeout+5)
+    print("getUpdates status:", r.status_code)
+    if r.status_code != 200:
+        print("getUpdates text:", r.text)
+        return []
+    data = r.json()
+    return data.get("result", [])
 
-# --- ارسال پیام به بله ---
 def send_message(chat_id, text, reply_markup=None):
-    url = f"https://api.bale.ai/bot{TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": text}
     if reply_markup:
-        payload["reply_markup"] = reply_markup
-    requests.post(url, json=payload)
+        payload["reply_markup"] = json.dumps(reply_markup)
+    r = requests.post(f"{API_URL}/sendMessage", data=payload, timeout=10)
+    print("sendMessage status:", r.status_code, "->", r.text[:200])
+    return r
 
-# --- حلقه اصلی بات ---
-def main():
-    print("✅ بات بله اجرا شد و منتظر پیام‌های جدید است...")
-    sheet = connect_to_sheets()
-    last_update_id = 0
+def save_contact(chat_id, username, phone):
+    try:
+        sheet.append_row([str(chat_id), username or "", phone])
+        print("Saved to sheet:", chat_id, username, phone)
+    except Exception as e:
+        print("Error saving to sheet:", e)
+
+def main_loop():
+    print("Starting bot main loop ...")
+    delete_webhook()  # مهم: وبهوک رو پاک کن که polling کار کنه
+    last_update_id = None
+
+    # کیبورد درخواست شماره
+    keyboard = {
+        "keyboard": [[{
+            "text": "ارسال شماره موبایل 📱",
+            "request_contact": True
+        }]],
+        "resize_keyboard": True,
+        "one_time_keyboard": True
+    }
 
     while True:
         try:
-            url = f"https://api.bale.ai/bot{TOKEN}/getUpdates?offset={last_update_id + 1}"
-            response = requests.get(url).json()
+            print("polling...")
+            updates = get_updates(offset=last_update_id+1 if last_update_id else None)
+            for update in updates:
+                print("update:", json.dumps(update, ensure_ascii=False))
+                last_update_id = update["update_id"]
 
-            if response.get("ok"):
-                for update in response.get("result", []):
-                    last_update_id = update["update_id"]
-                    message = update.get("message", {})
-                    chat_id = message.get("chat", {}).get("id")
+                message = update.get("message") or {}
+                chat = message.get("chat") or {}
+                chat_id = chat.get("id")
+                username = chat.get("username") or message.get("from", {}).get("username")
 
-                    # اگر کاربر استارت زد
-                    text = message.get("text")
-                    if text == "/start":
-                        # نمایش دکمه دریافت شماره
-                        reply_markup = {
-                            "keyboard": [
-                                [{"text": "📱 ارسال شماره من", "request_contact": True}]
-                            ],
-                            "resize_keyboard": True,
-                            "one_time_keyboard": True
-                        }
-                        send_message(chat_id, "سلام! برای ادامه لطفاً شماره موبایل خود را ارسال کنید 👇", reply_markup)
-                        continue
+                text = message.get("text")
+                contact = message.get("contact")
 
-                    # اگر کاربر شماره‌اش را فرستاد
-                    contact = message.get("contact")
-                    if contact:
-                        phone = contact.get("phone_number")
-                        username = message.get("from", {}).get("username", "بدون آیدی")
-                        name = contact.get("first_name")
+                # 1) شروع گفتگو
+                if text == "/start":
+                    send_message(
+                        chat_id,
+                        "سلام 👋\nبرای دسترسی به لینک کانال دوره، لطفاً شماره موبایل‌ت رو با دکمه زیر برام بفرست:",
+                        reply_markup=keyboard
+                    )
 
-                        # ذخیره‌سازی در گوگل شیت
-                        sheet.append_row([chat_id, username, name, phone])
+                # 2) دریافت شماره تماس
+                elif contact and "phone_number" in contact:
+                    phone = contact["phone_number"]
+                    save_contact(chat_id, username, phone)
 
-                        # ارسال لینک دوره به کاربر، بدون اعلام شماره
-                        channel_link = "https://bale.ai/join/YOUR_CHANNEL_ID"  # لینک کانال دوره‌ات را اینجا بگذار
-                        send_message(chat_id, f"🎯 ممنون {name}! این لینک دوره مخصوص شماست 👇\n ble.ir/join/9Ufz6EYmCs")
-                        continue
+                    send_message(
+                        chat_id,
+                        f"مرسی 🌟\nاین هم لینک کانال دوره:\n{COURSE_CHANNEL_LINK}"
+                    )
+
+            time.sleep(2)
 
         except Exception as e:
-            print(f"❗ خطا در اجرا: {e}")
+            print("❗ Loop error:", e)
+            time.sleep(3)
 
 if __name__ == "__main__":
-    # اجرای Flask در ترد جدا برای Render
-    threading.Thread(target=run_flask, daemon=True).start()
-    main()
+    # Flask را در یک ترد جدا بزن تا Render راضی باشد
+    t = threading.Thread(target=run_flask, daemon=True)
+    t.start()
+
+    # حلقه بات
+    main_loop()
